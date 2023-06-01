@@ -1,0 +1,88 @@
+{
+  "filters":{
+    "filter": [
+      {
+        "id": "79",
+        "rule": "(?:script>[^<]*alert\\()",
+        "description": "Detects HTML injection test",
+        "tags": {
+          "tag": [
+            "injection"
+          ]
+        },
+        "impact": "3"
+      },
+      {
+        "id": "80",
+        "rule": "(?:^[^\\(]*\\))",
+        "description": "Detects parentheses mismatch common with SQL injection",
+        "tags": {
+          "tag": [
+            "injection"
+          ]
+        },
+        "impact": "3"
+      },
+      {
+        "id": "81",
+        "rule": "(?:('|`))",
+        "description": "Detects single quote",
+        "tags": {
+          "tag": [
+            "injection"
+          ]
+        },
+        "impact": "4"
+      },
+      {
+        "id": "82",
+
+        "rule": "(?:(\\s+(and|or)\\s+|;|=|]-|\\+)(|not\\s+)(\\(|exp|json_keys|extractvalue|updatexml|row|select|\\d+=\\d+\\W))",
+        "description": "Detects logic manipulation",
+        "tags": {
+          "tag": [
+            "injection"
+          ]
+        },
+        "impact": "4"
+      },
+      {
+        "id": "83",
+        "rule": "waitfor delay",
+        "description": "Detects WAITFOR DELAY",
+        "tags": {
+          "tag": [
+            "injection"
+          ]
+        },
+        "impact": "2"
+      },
+      {
+        "id": "84",
+        "rule": "(?:(#|--|\\/\\*.*\\*\\/))",
+        "description": "Detects common comment types",
+        "tags": {
+          "tag": [
+            "xss",
+            "csrf",
+            "id"
+          ]
+        },
+        "impact": "3"
+      },
+      {
+        "id": "85",
+        "rule": "(?:(\\$\\{\\S*j\\S*n\\S*d*\\S(i|\\u0131)\\S*:\\S*l\\S*d\\S*a\\S*p\\S*:\\S*\\/\\S*\\/))",
+        "description": "Detects possible log4j2 exploit",
+        "tags": {
+          "tag": [
+            "CVE-2021-44228",
+            "injection",
+            "log4j"
+          ]
+        },
+        "impact": "3"
+      }
+    ]
+  }
+}
