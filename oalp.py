@@ -15,6 +15,7 @@ import sys
 import json
 from optparse import OptionParser
 from Web_Log_Deobfuscate import Deobfuscate_Web_Log
+from detect_log_format import get_log_format, parse_supplied_header
 
 #config section
 strInputFilePath = "" #Leave blank to process the directory specified in strInputPath. Use to specify a specific log file to process
@@ -22,11 +23,12 @@ strInputPath = "" #Path to folder containing log files to format. Separate from 
 strOutputPath = "" #Folder path to output formated logs. Make sure the folder path exists - script will not create the folder
 #Input settings
 inputEncoding = "utf-8" #set to "" to use system default
-strLineBeginingRE = "^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)" #regex to ensure each line starts with valid value. Set to "" to disable. default regex is for common log format and should be disabled or modfied for other formats
+strLineBeginingRE = r"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)" #regex to ensure each line starts with valid value. Set to "" to disable. default regex is for common log format and should be disabled or modfied for other formats
 quotecharacter = '\"'
 csv_quotechar = '\"'
 strdateFormat = "%d/%b/%Y:%H:%M:%S";#apache datetime format "%d/%b/%Y:%H:%M:%S"    #IIS format "%Y-%b-%d %H:%M:%S"
 outputDateFormat = '%Y-%m-%d %H:%M:%S'
+header_row = "" #Leave blank to automatically detect/create a header row. # supports unquoted comma, tab, and space as argument (will be converted to quoted CSV)
 columnCount = 0 #set to zero to have it dynamically identify the number of columns based on header row (first row). Note not all web servers log header rows
 boolPreprocess = False #preprocessing may be required. See if you get "Error on Row: " message and if so set to True.
 boolExpectDefaultFormat = True #added to improve accuracy of Common/Combined Log Format. Set to False for IIS logs
@@ -39,6 +41,8 @@ boolOutputSuspicious = False #If deobfuscating entries then output suspicious en
 boolphpids = False #Run log entries against phpids rules
 boolOutputIDS = False #Output PHPIDS rule match information
 boolOutputUnformatted = False #This is only useful when debugging
+bool_autodetect_format = True #override boolIIS with autodetection of log format
+bool_log_header_row = True #Log the header_row
 boolIIS = False #Use IIS settings (set boolExpectDefaultFormat = False and strdateFormat = "")
 #end config section
 boolSuspiciousLineFound = False #variable used to track when a line contains encoded data
@@ -65,6 +69,30 @@ def build_cli_parser():
     parser.add_option("-m", "--MicrosoftIIS", action="store_true", default=False, dest="boolIIS",
                       help="True or False value if Microsoft IIS logs")
     return parser
+
+def config_iis():
+    global boolExpectDefaultFormat, strdateFormat, strLineBeginingRE, csv_quotechar
+    boolExpectDefaultFormat = False
+    strdateFormat = ""
+    strLineBeginingRE = ""
+    csv_quotechar = '\x07' #https://stackoverflow.com/questions/494054/how-can-i-disable-quoting-in-the-python-2-4-csv-reader
+
+def autodetect_format(file_path, header_row):
+    global boolIIS
+    dict_format = get_log_format(file_path,inputEncoding)
+    if bool_autodetect_format:
+        boolIIS = dict_format['iis']
+        if boolIIS:
+            config_iis()
+    if header_row != "":
+      header_list = parse_supplied_header(header_row) 
+      int_hl = len(header_list)
+      int_lc = len(dict_format['header_row'])
+      if int_hl != int_lc:
+        print(f'Supplied header row had {int_hl} columns, but the log file appears to have {int_lc}')  
+    if bool_log_header_row:
+        return  '"' + '","'.join(dict_format['header_row']) + '"' #return auto detect header row
+    return header_row #return user provided header_row
 
 def phpIDS (strMatchCheck, idsFileHandle):
     global phpidSignatures
@@ -136,7 +164,7 @@ def CheckRemainingColumns(row_Check, intCurrentLoc, boolNumeric):#check for spec
             boolSpecialFound = False
     return -1
 
-def fileProcess(strInputFpath, strFileName, strOutPath):
+def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
     global boolSuspiciousLineFound
     global boolHead
     global columnCount
@@ -182,6 +210,10 @@ def fileProcess(strInputFpath, strFileName, strOutPath):
     csv.field_size_limit(2147483647) #increase threshold to avoid length limitation errors
     with open(strInputFpath, "rt", encoding=inputEncoding) as csvfile:
         with io.open(strOutPath , "a", encoding=outputEncoding) as f:
+            print(str_header_row)
+            if str_header_row != "":
+                print("header row")
+                f.write(str_header_row + "\n")
             queuedRows = []
             reader = csv.reader(csvfile, delimiter=' ', quotechar=csv_quotechar)
             for r_row in reader: #loop through each row of input
@@ -385,10 +417,7 @@ if opts.boolOutputIDS:
 if opts.boolIIS:
     boolIIS = opts.boolIIS
 if boolIIS == True:
-    boolExpectDefaultFormat = False
-    strdateFormat = ""
-    strLineBeginingRE = ""
-    csv_quotechar = '\x07' #https://stackoverflow.com/questions/494054/how-can-i-disable-quoting-in-the-python-2-4-csv-reader
+    config_iis()
 
 if strInputFilePath == "":
     if os.path.isfile(strInputPath):#check if a file path was provided instead of a folder
@@ -396,16 +425,24 @@ if strInputFilePath == "":
             strInputPath = ""
         
 if os.path.isdir(strInputPath):
+    bool_header_logged = False
     for file in os.listdir(strInputPath):
         if os.path.isdir(os.path.join(strInputPath, file)):
             for subfile in os.listdir(os.path.join(strInputPath, file)):
                 print(os.path.join(os.path.join(strInputPath, file), subfile))
+                if not bool_header_logged:
+                    header_row = autodetect_format(strInputFilePath, header_row)
+                    bool_header_logged = False
+                    
                 fileProcess(os.path.join(os.path.join(strInputPath, file), subfile), subfile, strOutputPath)
+                header_row = ""
         else:
             fileProcess(os.path.join(strInputPath, file), file, strOutputPath)
 else:
     fileName = os.path.basename(strInputFilePath)
-    fileProcess(strInputFilePath, fileName, strOutputPath)
+    header_row = autodetect_format(strInputFilePath, header_row)
+    
+    fileProcess(strInputFilePath, fileName, strOutputPath, str_header_row=header_row)
 
 
 
