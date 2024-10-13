@@ -15,7 +15,7 @@ import sys
 import json
 from optparse import OptionParser
 from Web_Log_Deobfuscate import Deobfuscate_Web_Log
-from detect_log_format import get_log_format, parse_supplied_header
+from detect_log_format import get_log_format, parse_supplied_header, query_yes_no
 
 #config section
 strInputFilePath = "" #Leave blank to process the directory specified in strInputPath. Use to specify a specific log file to process
@@ -68,6 +68,8 @@ def build_cli_parser():
                       help="True or False value if suspicious formatting should be logged")
     parser.add_option("-m", "--MicrosoftIIS", action="store_true", default=False, dest="boolIIS",
                       help="True or False value if Microsoft IIS logs")
+    parser.add_option("-w", "--headerrow", action="store", default=None, dest="header_row",
+                      help="Override auto-detect header row with the this provided value")
     return parser
 
 def config_iis():
@@ -77,19 +79,25 @@ def config_iis():
     strLineBeginingRE = ""
     csv_quotechar = '\x07' #https://stackoverflow.com/questions/494054/how-can-i-disable-quoting-in-the-python-2-4-csv-reader
 
+
 def autodetect_format(file_path, header_row):
     global boolIIS
-    dict_format = get_log_format(file_path,inputEncoding)
+    dict_format = get_log_format(file_path,inputEncoding, quotecharacter)
     if bool_autodetect_format:
         boolIIS = dict_format['iis']
         if boolIIS:
             config_iis()
     if header_row != "":
-      header_list = parse_supplied_header(header_row) 
-      int_hl = len(header_list)
       int_lc = len(dict_format['header_row'])
+      autod_row = dict_format['header_row']
+      header_list = parse_supplied_header(header_row) 
+      supplied_row = header_list['header_row']
+      int_hl = len(header_list['header_row'])
+
       if int_hl != int_lc:
-        print(f'Supplied header row had {int_hl} columns, but the log file appears to have {int_lc}')  
+          bool_continue = query_yes_no(f'The supplied header row had {int_hl} columns, but auto-detect identified the log file appears to have {int_lc}. Do you want to continue?\nHere is the auto-detect row followed by what was supplied:\n{autod_row}\n{supplied_row}\n')  # The code forces compliance on the header row. Getting the header row wrong will result in potentially undiserable results.
+          if bool_continue == False:
+            sys.exit()  
     if bool_log_header_row:
         return  '"' + '","'.join(dict_format['header_row']) + '"' #return auto detect header row
     return header_row #return user provided header_row
@@ -174,6 +182,8 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
         if not os.path.isfile(strInputFpath):
             return None
         elif not os.path.exists(strInputFpath):
+            print('Error: The specified input file does not exist.')
+            print('Please provide a valid input file path.')  
             return None
         tmpFilePath = strOutPath +"_preprocessed.tmp"
         if os.path.isfile(tmpFilePath):
@@ -204,9 +214,16 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
         strOutPath = strOutPath + strFileName + ".Formatted"
     
     if boolphpids == True and boolOutputIDS == True:
-        fP = io.open(strOutPath + ".IDS", "a", encoding=outputEncoding) #open file handle for logging IDS matches
+        try:
+            fP = io.open(strOutPath + ".IDS", "a", encoding=outputEncoding) #open file handle for logging IDS matches
+        except IOError as e:
+             print(f"Error opening file for IDS logging: {e.strerror}")
+             sys.exit(-1)
     if boolphpids == True or boolOutputSuspicious == True or boolOutputInteresting == True:#open file handle for interesting log output
-        fi = open(strOutPath + ".interesting","a", encoding=outputEncoding) #suspicious log entry output
+        try:
+            fi = open(strOutPath + ".interesting","a", encoding=outputEncoding) #suspicious log entry output
+        except IOError as e:
+            print(f"Error opening file for IDS logging: {e.strerror}")
     csv.field_size_limit(2147483647) #increase threshold to avoid length limitation errors
     with open(strInputFpath, "rt", encoding=inputEncoding) as csvfile:
         with io.open(strOutPath , "a", encoding=outputEncoding) as f:
@@ -265,7 +282,8 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
 
 
                         if boolphpids == True and boolSuspiciousLineFound != True:
-                            boolIDSdetection = phpIDS(column, fP)
+                            if boolOutputIDS:
+                                boolIDSdetection = phpIDS(column, fP)
                             boolSuspiciousLineFound  = boolIDSdetection
                         #saniColumn = str.replace(column, "'","") # remove quote chars
                         saniColumn = column
@@ -287,7 +305,8 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
                             saniColumn = deobfuscateEncoding(saniColumn)
                             saniColumn = str.replace(saniColumn, quotecharacter,"").replace("\n", "").replace("\rz", "") #remove format characters
                         if boolphpids == True and boolIDSdetection != True:
-                            boolIDSdetection = customIDS(saniColumn.lower(),fP)
+                            if boolOutputIDS:
+                                boolIDSdetection = customIDS(saniColumn.lower(),fP) #IDS logging
                             boolSuspiciousLineFound = boolIDSdetection
                         if  'HTTP/' in saniColumn:
                             boolRequestEnding = True
@@ -402,7 +421,13 @@ if opts.OutputPath:
     strOutputPath = opts.OutputPath
     print (strOutputPath)
 if (not strInputPath and not strInputFilePath) or not strOutputPath:
-    print ("Missing required parameter")
+    if(not strInputPath and not strInputFilePath and not strOutputPath):
+        print ("Missing required parameters -i and -o")
+    elif(not strInputPath and not strInputFilePath):    
+        print ("Missing required parameter -i")
+    elif(not strOutputPath):    
+        print ("Missing required parameter -o")
+    print('Example usage: python olap.py -i /path/to/input.log -o /path/to/output.log')
     sys.exit(-1)
 if opts.boolDeobfuscate:
     boolDeobfuscate = opts.boolDeobfuscate
@@ -418,6 +443,8 @@ if opts.boolIIS:
     boolIIS = opts.boolIIS
 if boolIIS == True:
     config_iis()
+if opts.header_row:
+    header_row = opts.header_row
 
 if strInputFilePath == "":
     if os.path.isfile(strInputPath):#check if a file path was provided instead of a folder

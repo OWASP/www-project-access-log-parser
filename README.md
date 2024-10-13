@@ -34,7 +34,10 @@ Options:
   -f, --formatlogging   True or False value if suspicious formatting should be
                         logged
                         
-  -m, --MicrosoftIIS    True or False value if target logs are IIS  
+  -m, --MicrosoftIIS    True or False value if target logs are IIS
+                        
+  -w, --headerrow       Override auto-detect header row with the this provided value
+<br /> 
 <br /> 
 Example:
 
