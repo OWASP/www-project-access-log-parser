@@ -37,6 +37,8 @@ Options:
   -m, --MicrosoftIIS    True or False value if target logs are IIS
                         
   -w, --headerrow       Override auto-detect header row with the this provided value
+                        
+  -c, --custom-filter   Specify the custom IDS rules file to use
 <br /> 
 <br /> 
 Example:

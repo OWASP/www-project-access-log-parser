@@ -49,6 +49,8 @@ boolSuspiciousLineFound = False #variable used to track when a line contains enc
 phpidSignatures = {} #phpids signatures
 customSignatures = {} #IDS signatures for deobfuscated log entries
 boolHead = False
+custom_ids_sig_file="custom_filter.json"
+
 
 def build_cli_parser():
     parser = OptionParser(usage="%prog [options]", description="Format malformed access logs to CSV")
@@ -70,6 +72,8 @@ def build_cli_parser():
                       help="True or False value if Microsoft IIS logs")
     parser.add_option("-w", "--headerrow", action="store", default=None, dest="header_row",
                       help="Override auto-detect header row with the this provided value")
+    parser.add_option("-c", "--custom-filter", action="store", default="custom_filter.json", dest="custom_ids_sig_file",
+                      help="Specify the custom IDS rules file to use")
     return parser
 
 def config_iis():
@@ -121,8 +125,15 @@ def phpIDS (strMatchCheck, idsFileHandle):
 def customIDS (strMatchCheck, idsFileHandle):
     global customSignatures
     if customSignatures == {}:
-        with open('custom_filter.json') as json_file:
-            customSignatures = json.load(json_file)
+        try:  
+          with open(custom_ids_sig_file) as json_file:
+              customSignatures = json.load(json_file)
+        except IOError as e:
+             print(f"Error opening custom IDS signatures from file {custom_ids_sig_file}: {e.strerror}")
+             sys.exit(-1)
+        except json.JSONDecodeError as e:
+             print(f"Error parsing custom IDS signatures from file {custom_ids_sig_file}: {e}")
+             sys.exit(-1)
     for filter in customSignatures['filters']['filter']:
         if re.search( filter['rule'], strMatchCheck.lower()):
             if boolOutputIDS == True:
@@ -212,10 +223,10 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
         strOutPath = strOutPath + "LogOutput.Formatted"
     else:
         strOutPath = strOutPath + strFileName + ".Formatted"
-    
+    file_handle_ids = None
     if boolphpids == True and boolOutputIDS == True:
         try:
-            fP = io.open(strOutPath + ".IDS", "a", encoding=outputEncoding) #open file handle for logging IDS matches
+            file_handle_ids = io.open(strOutPath + ".IDS", "a", encoding=outputEncoding) #open file handle for logging IDS matches
         except IOError as e:
              print(f"Error opening file for IDS logging: {e.strerror}")
              sys.exit(-1)
@@ -282,8 +293,7 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
 
 
                         if boolphpids == True and boolSuspiciousLineFound != True:
-                            if boolOutputIDS:
-                                boolIDSdetection = phpIDS(column, fP)
+                            boolIDSdetection = phpIDS(column, file_handle_ids)
                             boolSuspiciousLineFound  = boolIDSdetection
                         #saniColumn = str.replace(column, "'","") # remove quote chars
                         saniColumn = column
@@ -305,8 +315,7 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
                             saniColumn = deobfuscateEncoding(saniColumn)
                             saniColumn = str.replace(saniColumn, quotecharacter,"").replace("\n", "").replace("\rz", "") #remove format characters
                         if boolphpids == True and boolIDSdetection != True:
-                            if boolOutputIDS:
-                                boolIDSdetection = customIDS(saniColumn.lower(),fP) #IDS logging
+                            boolIDSdetection = customIDS(saniColumn.lower(),file_handle_ids)
                             boolSuspiciousLineFound = boolIDSdetection
                         if  'HTTP/' in saniColumn:
                             boolRequestEnding = True
@@ -408,7 +417,7 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
     if os.path.isfile(strInputFilePath +".tmp"):
         os.remove(strInputFilePath +".tmp")     
     if boolphpids == True and boolOutputIDS == True:
-        fP.close() #close file handle for IDS log output
+        file_handle_ids.close() #close file handle for IDS log output
     if boolphpids == True or boolOutputSuspicious == True or boolOutputInteresting == True:#open file handle for interesting log output
         fi.close() #close file handle for interesting log output
 
@@ -445,6 +454,8 @@ if boolIIS == True:
     config_iis()
 if opts.header_row:
     header_row = opts.header_row
+if opts.custom_ids_sig_file:
+    custom_ids_sig_file = opts.custom_ids_sig_file
 
 if strInputFilePath == "":
     if os.path.isfile(strInputPath):#check if a file path was provided instead of a folder
