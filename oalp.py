@@ -6,13 +6,8 @@
 #Combined Log Format will break down to the following columns
 #RemoteIP,RemoteLogName,RemoteUser,EventTime,TimeZone,Request,StatusCode,Size,Referrer,UserAgent
 
-import csv
-import io
-import os
-import re 
-import time
-import sys
-import json
+import csv, io, os, re, time, sys, json
+import jsonLogParser
 from optparse import OptionParser
 from Web_Log_Deobfuscate import Deobfuscate_Web_Log
 from detect_log_format import get_log_format, parse_supplied_header, query_yes_no
@@ -50,7 +45,8 @@ phpidSignatures = {} #phpids signatures
 customSignatures = {} #IDS signatures for deobfuscated log entries
 boolHead = False
 custom_ids_sig_file="custom_filter.json"
-
+boolJSON=False
+customJsonFieldNames=None
 
 def build_cli_parser():
     parser = OptionParser(usage="%prog [options]", description="Format malformed access logs to CSV")
@@ -74,6 +70,10 @@ def build_cli_parser():
                       help="Override auto-detect header row with the this provided value")
     parser.add_option("-c", "--custom-filter", action="store", default="custom_filter.json", dest="custom_ids_sig_file",
                       help="Specify the custom IDS rules file to use")
+    parser.add_option("-j","--json-logs", action="store_true", default=False, dest="boolJSON",
+                  help="True or False value if log format is JSON")
+    parser.add_option("--field-names", action="store", default=None, dest="customJsonFieldNames", 
+                  help='JSON representation of field names mapping') 
     return parser
 
 def config_iis():
@@ -102,7 +102,7 @@ def autodetect_format(file_path, header_row):
           bool_continue = query_yes_no(f'The supplied header row had {int_hl} columns, but auto-detect identified the log file appears to have {int_lc}. Do you want to continue?\nHere is the auto-detect row followed by what was supplied:\n{autod_row}\n{supplied_row}\n')  # The code forces compliance on the header row. Getting the header row wrong will result in potentially undiserable results.
           if bool_continue == False:
             sys.exit()  
-    if bool_log_header_row:
+    if bool_log_header_row and not "json" in dict_format:
         return  '"' + '","'.join(dict_format['header_row']) + '"' #return auto detect header row
     return header_row #return user provided header_row
 
@@ -188,6 +188,13 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
     global boolHead
     global columnCount
     boolIDSdetection = False
+
+    if boolJSON:     #checking if input file type is json and converting it CLF
+       strInputFpath, tmp_header_row=jsonLogParser.parseJSONLogs(strInputFpath,strOutputPath,customJsonFieldNames)
+       if bool_log_header_row:
+           str_header_row = '"' + '","'.join(tmp_header_row) + '"' # for the future. Right now we only support certain fields via JSON
+           str_header_row = '"ip","user","date","request","status","size"'
+
     if boolPreprocess == True:
         
         if not os.path.isfile(strInputFpath):
@@ -450,6 +457,10 @@ if opts.boolOutputIDS:
     boolOutputIDS = opts.boolOutputIDS
 if opts.boolIIS:
     boolIIS = opts.boolIIS
+if opts.boolJSON:
+    boolJSON=opts.boolJSON
+    strLineBeginingRE = ""
+    boolExpectDefaultFormat = False
 if boolIIS == True:
     config_iis()
 if opts.header_row:

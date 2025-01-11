@@ -9,11 +9,14 @@ def get_log_format(strInputFpath, inputEncoding,quote_char):
   list_header = []
   first_row_read = False
   bool_iis_marker = False
+  bool_json_marker = False
   with open(strInputFpath, "rt", encoding=inputEncoding) as f:
     for line in f:
        if first_row_read == True:
          break
        print(line.rstrip())
+       if line == "[\n":
+         bool_json_marker = True
        if len(line)>0 and line[0] != "#":
         first_row_read = True
         logreader = csv.reader(line.splitlines(), delimiter=' ', quotechar=quote_char)
@@ -75,6 +78,9 @@ def get_log_format(strInputFpath, inputEncoding,quote_char):
          dict_header_info["iis"] = True
          break
   #dict_return = {"bool_iis":bool_iis_marker, "dict_columns":dict_header_info}  
+  if bool_json_marker and dict_header_info == {}: #failure to parse logs that appear to be JSON
+     dict_header_info["iis"] = False
+     dict_header_info["json"] = True
   return dict_header_info
 
 def parse_supplied_header(supplied_header):
