@@ -14,7 +14,7 @@ def get_log_format(strInputFpath, inputEncoding,quote_char):
     for line in f:
        if first_row_read == True:
          break
-       print(line.rstrip())
+       #print(line.rstrip())
        if line == "[\n":
          bool_json_marker = True
        if len(line)>0 and line[0] != "#":
