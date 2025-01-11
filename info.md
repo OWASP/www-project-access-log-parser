@@ -1,7 +1,7 @@
 ### Access Log Parser Information
 * [Flagship Project](#)
 * [Tool Project](#)
-* [Version 1.0.3](#)
+* [Version 1.0.4](#)
 * [Builder](#)
 * [Breaker](#)
 
