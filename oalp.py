@@ -70,6 +70,8 @@ def build_cli_parser():
                       help="Override auto-detect header row with the this provided value")
     parser.add_option("-c", "--custom-filter", action="store", default="custom_filter.json", dest="custom_ids_sig_file",
                       help="Specify the custom IDS rules file to use")
+    parser.add_option("--multi-file-output", action="store", default=False, dest="boolMultiFile",
+                  help="Specify whether each input file should have a separate output file. If not set, all input files will be processed together, and a single output file will be generated. Default is False.")
     parser.add_option("-j","--json-logs", action="store_true", default=False, dest="boolJSON",
                   help="True or False value if log format is JSON")
     parser.add_option("--field-names", action="store", default=None, dest="customJsonFieldNames", 
@@ -453,6 +455,8 @@ if opts.boolphpids:
     boolphpids = opts.boolphpids
 if opts.boolOutputInteresting:
     boolOutputInteresting = opts.boolOutputInteresting
+if opts.boolMultiFile:
+    boolSingleFile=not opts.boolMultiFile
 if opts.boolOutputIDS:
     boolOutputIDS = opts.boolOutputIDS
 if opts.boolIIS:
