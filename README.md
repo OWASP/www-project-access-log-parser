@@ -38,6 +38,8 @@ Options:
                         
   -w, --headerrow       Override auto-detect header row with the this provided value
                         
+  --multi-file-output   Specify whether each input file should have a separate output file. If not set, all input files will be processed together, and a single output file will be generated. Default is False.
+
   -c, --custom-filter   Specify the custom IDS rules file to use
 <br /> 
 <br /> 

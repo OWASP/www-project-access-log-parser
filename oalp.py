@@ -6,11 +6,13 @@
 #Combined Log Format will break down to the following columns
 #RemoteIP,RemoteLogName,RemoteUser,EventTime,TimeZone,Request,StatusCode,Size,Referrer,UserAgent
 
-import csv, io, os, re, time, sys, json
+import csv, io, os, re, time, sys, json, threading, concurrent.futures
+import logging
 import jsonLogParser
 from optparse import OptionParser
 from Web_Log_Deobfuscate import Deobfuscate_Web_Log
 from detect_log_format import get_log_format, parse_supplied_header, query_yes_no
+
 
 #config section
 strInputFilePath = "" #Leave blank to process the directory specified in strInputPath. Use to specify a specific log file to process
@@ -48,6 +50,25 @@ custom_ids_sig_file="custom_filter.json"
 boolJSON=False
 customJsonFieldNames=None
 
+logger = logging.getLogger(__name__)
+logger.propagate = False
+# create file handler which logs even debug messages
+fh = logging.FileHandler('oalp.log')
+fh.setLevel(logging.DEBUG)
+logger.addHandler(fh)
+
+class bcolors: #https://stackoverflow.com/questions/287871/how-do-i-print-colored-text-to-the-terminal
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+
 def build_cli_parser():
     parser = OptionParser(usage="%prog [options]", description="Format malformed access logs to CSV")
     parser.add_option("-i", "--input", action="store", default=None, dest="InputPath",
@@ -70,8 +91,9 @@ def build_cli_parser():
                       help="Override auto-detect header row with the this provided value")
     parser.add_option("-c", "--custom-filter", action="store", default="custom_filter.json", dest="custom_ids_sig_file",
                       help="Specify the custom IDS rules file to use")
-    parser.add_option("--multi-file-output", action="store", default=False, dest="boolMultiFile",
-                  help="Specify whether each input file should have a separate output file. If not set, all input files will be processed together, and a single output file will be generated. Default is False.")
+    parser.add_option( "--multi-file-output", action="store_true", default=False, dest="boolMultiFile",
+                  help="Specify whether each input file should have a separate output file. "
+                             "If not set, all input files will be processed together, and a single output file will be generated. Default is False.")
     parser.add_option("-j","--json-logs", action="store_true", default=False, dest="boolJSON",
                   help="True or False value if log format is JSON")
     parser.add_option("--field-names", action="store", default=None, dest="customJsonFieldNames", 
@@ -169,8 +191,7 @@ def deobfuscateEncoding(line):
         if strTmpCompare.replace("%2520", " ").replace("%20", " ") != strOutput:
           boolSuspiciousLineFound = True
     return strOutput
-
-              
+            
 def CheckRemainingColumns(row_Check, intCurrentLoc, boolNumeric):#check for special chars followed by numeric
     boolSpecialFound = False
     for intLoopRemaining in range(intCurrentLoc, len(row_Check)):
@@ -184,6 +205,34 @@ def CheckRemainingColumns(row_Check, intCurrentLoc, boolNumeric):#check for spec
         else:
             boolSpecialFound = False
     return -1
+
+def process_file(file_path, file_name, output_path, str_header_row = ""):
+    fileProcess(file_path, file_name, output_path, str_header_row)
+
+def process_directory(input_path, output_path, str_header_row = ""):
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = []
+
+        for file_name in os.listdir(input_path):
+
+            file_path = os.path.join(input_path, file_name)
+
+            if os.path.isdir(file_path):
+                # Recursively process subdirectories
+                futures.append(executor.submit(process_directory, file_path, output_path))
+            else:
+                header_row = autodetect_format(file_path, str_header_row)  #todo: option to assume head row consistency and skip future checks  
+                # Process individual files
+                futures.append(executor.submit(process_file, file_path, file_name,output_path, header_row))
+
+        # Wait for all futures to complete using `as_completed` iterator
+        for future in concurrent.futures.as_completed(futures):
+            # Handle any exceptions raised by the submitted tasks
+            try:
+                future.result()
+            except Exception as e:
+                print(f"Error processing file: {e}")
+                #log error
 
 def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
     global boolSuspiciousLineFound
@@ -245,184 +294,191 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
         except IOError as e:
             print(f"Error opening file for IDS logging: {e.strerror}")
     csv.field_size_limit(2147483647) #increase threshold to avoid length limitation errors
+
     with open(strInputFpath, "rt", encoding=inputEncoding) as csvfile:
         with io.open(strOutPath , "a", encoding=outputEncoding) as f:
-            print(str_header_row)
+            #print(str_header_row)
             if str_header_row != "":
-                print("header row")
+                #print("header row")
                 f.write(str_header_row + "\n")
+                boolHead = True # only write header row once
             queuedRows = []
             reader = csv.reader(csvfile, delimiter=' ', quotechar=csv_quotechar)
-            for r_row in reader: #loop through each row of input
-                queuedRows = [r_row]
-                intCheckFirstUserInput = 0
-                if strLineBeginingRE != "": #can we validate the row start with regex
-                    intListCount = 0
-                    boolMatch = re.match(strLineBeginingRE, r_row[0])
-                    if not boolMatch: #ensure first item has a valid value
-                        for testColumns in r_row:
-                            intListCount +=1
-                            if re.match(strLineBeginingRE, testColumns):
+            try:
+              for r_row in reader: #loop through each row of input
+                  queuedRows = [r_row]
+                  intCheckFirstUserInput = 0
+                  if strLineBeginingRE != "": #can we validate the row start with regex
+                      intListCount = 0
+                      boolMatch = re.match(strLineBeginingRE, r_row[0])
+                      if not boolMatch: #ensure first item has a valid value
+                          for testColumns in r_row:
+                              intListCount +=1
+                              if re.match(strLineBeginingRE, testColumns):
                                 
-                                rowSlice = slice(intListCount -1, len(r_row))
-                                queuedRows = [r_row[rowSlice]]
-                                break
-                if '\n' in "".join(r_row) and columnCount > 0: #handle newline in row 
-                    if len(r_row) / columnCount >= 2:
-                        intListCount = 0
-                        for testColumns in r_row:
-                            intListCount +=1
-                            if '\n' in testColumns:
-                                queuedRows = [r_row[:intListCount]]
-                                print ("Error on Row: " + "".join(r_row))
-                                queuedRows[len(queuedRows)-1][intListCount-1] = testColumns[0:testColumns.find("\n")]
-                                break
+                                  rowSlice = slice(intListCount -1, len(r_row))
+                                  queuedRows = [r_row[rowSlice]]
+                                  break
+                  if '\n' in "".join(r_row) and columnCount > 0: #handle newline in row 
+                      if len(r_row) / columnCount >= 2:
+                          intListCount = 0
+                          for testColumns in r_row:
+                              intListCount +=1
+                              if '\n' in testColumns:
+                                  queuedRows = [r_row[:intListCount]]
+                                  print ("Error on Row: " + "".join(r_row))
+                                  queuedRows[len(queuedRows)-1][intListCount-1] = testColumns[0:testColumns.find("\n")]
+                                  break
                                  
 
-                for row in queuedRows:
-                    if columnCount == 0 and boolIIS == False:
-                        columnCount = len(row)#dynamic row length
+                  for row in queuedRows:
+                      if columnCount == 0 and boolIIS == False:
+                          columnCount = len(row)#dynamic row length
 
-                    if "\\" in "".join(row) and boolOutputInteresting == True:
-                        boolSuspiciousLineFound = True #Trigger logging suspicious line
-                    outputRow = ""
-                    boolSkipColumn = False
-                    lastColumnEscaped = False
-                    intColumnCount = 0
-                    intWriteCount = 0
-                    skippedColumns = 0
-                    boolDateCoverted = False
-                    boolExcludeRow = False #IIS headers are dropped
-                    boolRequestEnding = False # this was added to track the request column. Set to true once "HTTP/" is encountered. Example: HTTP/1.1"
+                      if "\\" in "".join(row) and boolOutputInteresting == True:
+                          boolSuspiciousLineFound = True #Trigger logging suspicious line
+                      outputRow = ""
+                      boolSkipColumn = False
+                      lastColumnEscaped = False
+                      intColumnCount = 0
+                      intWriteCount = 0
+                      skippedColumns = 0
+                      boolDateCoverted = False
+                      boolExcludeRow = False #IIS headers are dropped
+                      boolRequestEnding = False # this was added to track the request column. Set to true once "HTTP/" is encountered. Example: HTTP/1.1"
                     
-                    for column in row:
-                        intColumnCount += 1
-                        boolQuoteRemoved = False
-                        boolEscapeChar = False
+                      for column in row:
+                          intColumnCount += 1
+                          boolQuoteRemoved = False
+                          boolEscapeChar = False
 
 
-                        if boolphpids == True and boolSuspiciousLineFound != True:
-                            boolIDSdetection = phpIDS(column, file_handle_ids)
-                            boolSuspiciousLineFound  = boolIDSdetection
-                        #saniColumn = str.replace(column, "'","") # remove quote chars
-                        saniColumn = column
-                        if boolIIS == True and intColumnCount == 1 and "#Fields:" in saniColumn:
-                            if boolHead == False:
-                                saniColumn = ""
-                                boolSkipColumn = True
-                                if columnCount ==0: #if dynamic header identification
-                                    columnCount = len(row) -2 #dynamic row length
-                            else:
-                                boolExcludeRow = True
-                                break #skip header row
-                        if boolIIS == True and intColumnCount == 1 and ("#Software:" in saniColumn or "#Version:" in saniColumn or "#Date:" in saniColumn):
-                            boolExcludeRow = True
-                            break #drop IIS header rows
+                          if boolphpids == True and boolSuspiciousLineFound != True:
+                              boolIDSdetection = phpIDS(column, file_handle_ids)
+                              boolSuspiciousLineFound  = boolIDSdetection
+                          #saniColumn = str.replace(column, "'","") # remove quote chars
+                          saniColumn = column
+                          if boolIIS == True and intColumnCount == 1 and "#Fields:" in saniColumn:
+                              if boolHead == False:
+                                  saniColumn = ""
+                                  boolSkipColumn = True
+                                  if columnCount ==0: #if dynamic header identification
+                                      columnCount = len(row) -2 #dynamic row length
+                              else:
+                                  boolExcludeRow = True
+                                  break #skip header row
+                          if boolIIS == True and intColumnCount == 1 and ("#Software:" in saniColumn or "#Version:" in saniColumn or "#Date:" in saniColumn):
+                              boolExcludeRow = True
+                              break #drop IIS header rows
 
                             
-                        if boolDeobfuscate == True: #perform decoding
-                            saniColumn = deobfuscateEncoding(saniColumn)
-                            saniColumn = str.replace(saniColumn, quotecharacter,"").replace("\n", "").replace("\rz", "") #remove format characters
-                        if boolphpids == True and boolIDSdetection != True:
-                            boolIDSdetection = customIDS(saniColumn.lower(),file_handle_ids)
-                            boolSuspiciousLineFound = boolIDSdetection
-                        if  'HTTP/' in saniColumn:
-                            boolRequestEnding = True
+                          if boolDeobfuscate == True: #perform decoding
+                              saniColumn = deobfuscateEncoding(saniColumn)
+                              saniColumn = str.replace(saniColumn, quotecharacter,"").replace("\n", "").replace("\rz", "") #remove format characters
+                          if boolphpids == True and boolIDSdetection != True:
+                              boolIDSdetection = customIDS(saniColumn.lower(),file_handle_ids)
+                              boolSuspiciousLineFound = boolIDSdetection
+                          if  'HTTP/' in saniColumn:
+                              boolRequestEnding = True
                         
-                        if '\"' in saniColumn:
-                            saniColumn = str.replace(saniColumn, quotecharacter,"")  # remove quote chars
-                            boolQuoteRemoved = True
-                        if boolExpectDefaultFormat == True and intColumnCount == 6 and row[6].isnumeric() == True and  row[7].isnumeric() == True: #if this is the request column and next two columns are numeric then 
-                            boolRequestEnding = True        #Things line up formatting wise that we don't need to check for escape characters
-                        elif boolExpectDefaultFormat == True and intColumnCount == 3 and "[" == row[4][:1]: #if the column after next is the datetime field then we need to merge the next field with this one
-                            boolQuoteRemoved = True
-                            boolEscapeChar = True
-                        elif '\\' in saniColumn:
-                            if (boolDateCoverted == True): # if we have made it past the user name and date field (only need escape character checks for fields with user provided input). Example: domainname\x5Cryan.boyle  
-                                if right(saniColumn,1) == "\\" and boolDeobfuscate == False:
-                                    boolQuoteRemoved = True
-                                saniColumn = str.replace(saniColumn, "\\","")  #remove escape character
-                                boolEscapeChar = True
-                        elif boolExpectDefaultFormat == True and intColumnCount == 6 and ('GET' in saniColumn or 'POST' in saniColumn or 'PUT' in saniColumn  or 'HEAD' in saniColumn  or 'PUT' in saniColumn  or 'DELETE' in saniColumn) and boolRequestEnding == False:
-                            boolEscapeChar = True #specific way to identify the request column and combine
-                        elif boolExpectDefaultFormat == True and intColumnCount > 6 and boolRequestEnding == False:
-                            boolEscapeChar = True #specific way to identify the request column and combine
-                        elif boolExpectDefaultFormat == True and intColumnCount == columnCount and len(row) - intColumnCount - skippedColumns != columnCount - intColumnCount:
-                            boolEscapeChar = True #This will cause the script to add up all final columns into the last one
-                        if boolDateCoverted == False and saniColumn[0:1] == "[":# format date time
-                            boolDateCoverted = True
-                            logDateTime = time.strptime( saniColumn[1:], strdateFormat)
-                            saniColumn = time.strftime(outputDateFormat, logDateTime)
+                          if '\"' in saniColumn:
+                              saniColumn = str.replace(saniColumn, quotecharacter,"")  # remove quote chars
+                              boolQuoteRemoved = True
+                          if boolExpectDefaultFormat == True and intColumnCount == 6 and row[6].isnumeric() == True and  row[7].isnumeric() == True: #if this is the request column and next two columns are numeric then 
+                              boolRequestEnding = True        #Things line up formatting wise that we don't need to check for escape characters
+                          elif boolExpectDefaultFormat == True and intColumnCount == 3 and "[" == row[4][:1]: #if the column after next is the datetime field then we need to merge the next field with this one
+                              boolQuoteRemoved = True
+                              boolEscapeChar = True
+                          elif '\\' in saniColumn:
+                              if (boolDateCoverted == True): # if we have made it past the user name and date field (only need escape character checks for fields with user provided input). Example: domainname\x5Cryan.boyle  
+                                  if right(saniColumn,1) == "\\" and boolDeobfuscate == False:
+                                      boolQuoteRemoved = True
+                                  saniColumn = str.replace(saniColumn, "\\","")  #remove escape character
+                                  boolEscapeChar = True
+                          elif boolExpectDefaultFormat == True and intColumnCount == 6 and ('GET' in saniColumn or 'POST' in saniColumn or 'PUT' in saniColumn  or 'HEAD' in saniColumn  or 'PUT' in saniColumn  or 'DELETE' in saniColumn) and boolRequestEnding == False:
+                              boolEscapeChar = True #specific way to identify the request column and combine
+                          elif boolExpectDefaultFormat == True and intColumnCount > 6 and boolRequestEnding == False:
+                              boolEscapeChar = True #specific way to identify the request column and combine
+                          elif boolExpectDefaultFormat == True and intColumnCount == columnCount and len(row) - intColumnCount - skippedColumns != columnCount - intColumnCount:
+                              boolEscapeChar = True #This will cause the script to add up all final columns into the last one
+                          if boolDateCoverted == False and saniColumn[0:1] == "[":# format date time
+                              boolDateCoverted = True
+                              logDateTime = time.strptime( saniColumn[1:], strdateFormat)
+                              saniColumn = time.strftime(outputDateFormat, logDateTime)
 
 
-                        if boolEscapeChar == True and len(row) > columnCount and boolSkipColumn == False and boolQuoteRemoved == True:  #escaped character and column mismatch
+                          if boolEscapeChar == True and len(row) > columnCount and boolSkipColumn == False and boolQuoteRemoved == True:  #escaped character and column mismatch
                         
-                            if len(row) - intColumnCount != 0:
-                                outputRow = outputRow + ',"' + saniColumn #add new column
-                            else:
-                                outputRow = outputRow + " " + saniColumn #continue column and add separator char back
-                            intWriteCount += 1
-                            if len(row) - intColumnCount - skippedColumns != columnCount - intColumnCount: #more columns than what is expected so combine next column
-                                boolSkipColumn = True
-                        elif boolSkipColumn == True and (len(row) - intColumnCount - skippedColumns != columnCount - intColumnCount): #still more columns than what is expected so combine next column
-                            skippedColumns +=1
-                            if boolHead == False and boolIIS == True and intColumnCount == 1: #IIS header row manipulation
-                                outputRow = "\"" #excluding #Fields: and replacing with a qoute to start our next field
-                                continue
-                            if intCheckFirstUserInput == 0:
-                                intCheckFirstUserInput = CheckRemainingColumns(row, intColumnCount, True) # row, currentColumn, boolCheckNumeric
-                            if  intCheckFirstUserInput >= intColumnCount:#check for special chars followed by number (In apache logs this is the first non system/user provided column that is followed by a status code)
-                                outputRow = outputRow + " " + saniColumn #continue column and add separator char back
-                            elif boolQuoteRemoved == True and CheckRemainingColumns(row, intColumnCount, False) <= intColumnCount and not (intColumnCount - skippedColumns == columnCount and len(row) - intColumnCount != 0):#check for special chars ensuring we don't close the column if there is still items to add 
-                                outputRow = outputRow + " " + saniColumn + '"' #Finish and close column
-                                boolSkipColumn = False
-                                intWriteCount += 1
-                            elif boolHead == False and boolIIS == True and intColumnCount == 2: #IIS header row manipulation continuation
-                                outputRow = outputRow + saniColumn #this is actually our first output value entry as we skipped #Fields:
-                                boolHead = True
-                            else:
-                                outputRow = outputRow + " " + saniColumn #continue column and add separator char back
-                        elif boolSkipColumn == True and len(row) - intColumnCount - skippedColumns == columnCount - intColumnCount: #New columns are just right
-                            skippedColumns +=1
-                            outputRow = appendQuote(outputRow) + ',"' + saniColumn + '"' #Close column and add new column
-                            boolSkipColumn = False
-                            intWriteCount += 1
+                              if len(row) - intColumnCount != 0:
+                                  outputRow = outputRow + ',"' + saniColumn #add new column
+                              else:
+                                  outputRow = outputRow + " " + saniColumn #continue column and add separator char back
+                              intWriteCount += 1
+                              if len(row) - intColumnCount - skippedColumns != columnCount - intColumnCount: #more columns than what is expected so combine next column
+                                  boolSkipColumn = True
+                          elif boolSkipColumn == True and (len(row) - intColumnCount - skippedColumns != columnCount - intColumnCount): #still more columns than what is expected so combine next column
+                              skippedColumns +=1
+                              if boolHead == False and boolIIS == True and intColumnCount == 1: #IIS header row manipulation
+                                  outputRow = "\"" #excluding #Fields: and replacing with a qoute to start our next field
+                                  continue
+                              if intCheckFirstUserInput == 0:
+                                  intCheckFirstUserInput = CheckRemainingColumns(row, intColumnCount, True) # row, currentColumn, boolCheckNumeric
+                              if  intCheckFirstUserInput >= intColumnCount:#check for special chars followed by number (In apache logs this is the first non system/user provided column that is followed by a status code)
+                                  outputRow = outputRow + " " + saniColumn #continue column and add separator char back
+                              elif boolQuoteRemoved == True and CheckRemainingColumns(row, intColumnCount, False) <= intColumnCount and not (intColumnCount - skippedColumns == columnCount and len(row) - intColumnCount != 0):#check for special chars ensuring we don't close the column if there is still items to add 
+                                  outputRow = outputRow + " " + saniColumn + '"' #Finish and close column
+                                  boolSkipColumn = False
+                                  intWriteCount += 1
+                              elif boolHead == False and boolIIS == True and intColumnCount == 2: #IIS header row manipulation continuation
+                                  outputRow = outputRow + saniColumn #this is actually our first output value entry as we skipped #Fields:
+                                  boolHead = True
+                              else:
+                                  outputRow = outputRow + " " + saniColumn #continue column and add separator char back
+                          elif boolSkipColumn == True and len(row) - intColumnCount - skippedColumns == columnCount - intColumnCount: #New columns are just right
+                              skippedColumns +=1
+                              outputRow = appendQuote(outputRow) + ',"' + saniColumn + '"' #Close column and add new column
+                              boolSkipColumn = False
+                              intWriteCount += 1
 
 
 
-                        elif outputRow == "": # first column in new row
-                            outputRow = '"' + saniColumn + '"'
-                            intWriteCount += 1
+                          elif outputRow == "": # first column in new row
+                              outputRow = '"' + saniColumn + '"'
+                              intWriteCount += 1
                     
-                        else: # add new column
-                            if boolEscapeChar == True:
-                                lastColumnEscaped = True
-                                outputRow = appendQuote(outputRow) + ',"' + saniColumn #start new column
-                                boolSkipColumn = True 
-                            elif intColumnCount - skippedColumns >= columnCount and len(row) == intColumnCount and columnCount != len(row): #we've got too many columns. Mash last one together
-                                outputRow = appendQuote(outputRow) + ',"' + saniColumn + '"' #Close column and add final column
-                            elif intWriteCount + 1 == columnCount and len(row) > intColumnCount:
-                                outputRow = appendQuote(outputRow) + ',"' + saniColumn #start new column
-                            else:
-                                outputRow = outputRow + ',"' + saniColumn + '"'#start and close new column
-                                intWriteCount += 1
+                          else: # add new column
+                              if boolEscapeChar == True:
+                                  lastColumnEscaped = True
+                                  outputRow = appendQuote(outputRow) + ',"' + saniColumn #start new column
+                                  boolSkipColumn = True 
+                              elif intColumnCount - skippedColumns >= columnCount and len(row) == intColumnCount and columnCount != len(row): #we've got too many columns. Mash last one together
+                                  outputRow = appendQuote(outputRow) + ',"' + saniColumn + '"' #Close column and add final column
+                              elif intWriteCount + 1 == columnCount and len(row) > intColumnCount:
+                                  outputRow = appendQuote(outputRow) + ',"' + saniColumn #start new column
+                              else:
+                                  outputRow = outputRow + ',"' + saniColumn + '"'#start and close new column
+                                  intWriteCount += 1
 
-                    if len(row) < columnCount:
-                        for x in range(0,columnCount - len(row)):
-                            outputRow = appendQuote(outputRow) + ',\"ParseError\"'
-                    if right(outputRow, 1) != '\"':
-                        #outputRow = outputRow + '\"'
-                        if boolOutputUnformatted == True:
-                            with io.open(strOutPath + ".Unformatted", "a", encoding=outputEncoding) as fU:#Unformatted output that eluded a final quote
-                                fU.write(outputRow + "\n")
-                    outputRow = appendQuote(outputRow) 
+                      if len(row) < columnCount:
+                          for x in range(0,columnCount - len(row)):
+                              outputRow = appendQuote(outputRow) + ',\"ParseError\"'
+                      if right(outputRow, 1) != '\"':
+                          #outputRow = outputRow + '\"'
+                          if boolOutputUnformatted == True:
+                              with io.open(strOutPath + ".Unformatted", "a", encoding=outputEncoding) as fU:#Unformatted output that eluded a final quote
+                                  fU.write(outputRow + "\n")
+                      outputRow = appendQuote(outputRow) 
 
-                    if boolExcludeRow == False:
-                        f.write(outputRow + "\n")
-                        if boolSuspiciousLineFound == True:
-                            boolSuspiciousLineFound = False
-                            boolIDSdetection = False
-                            fi.write(outputRow + "\n")
+                      if boolExcludeRow == False:
+                          f.write(outputRow + "\n")
+                          if boolSuspiciousLineFound == True:
+                              boolSuspiciousLineFound = False
+                              boolIDSdetection = False
+                              fi.write(outputRow + "\n")
+            except UnicodeDecodeError:
+              logger.error("Error: File not encoded in UTF-8: %s", strInputFpath, exc_info=True)
+              print(f"{bcolors.FAIL}Error: File not encoded in UTF-8 (see oalp.log for exception details). Try a different encoding for file {strInputFpath}{bcolors.ENDC}")
+
     if os.path.isfile(strInputFilePath +".tmp"):
         os.remove(strInputFilePath +".tmp")     
     if boolphpids == True and boolOutputIDS == True:
@@ -434,10 +490,10 @@ parser = build_cli_parser()
 opts, args = parser.parse_args(sys.argv[1:])
 if opts.InputPath:
     strInputPath = opts.InputPath
-    print (strInputPath)
+    print (f"input={strInputPath}")
 if opts.OutputPath:
     strOutputPath = opts.OutputPath
-    print (strOutputPath)
+    print (f"output={strOutputPath}")
 if (not strInputPath and not strInputFilePath) or not strOutputPath:
     if(not strInputPath and not strInputFilePath and not strOutputPath):
         print ("Missing required parameters -i and -o")
@@ -455,10 +511,10 @@ if opts.boolphpids:
     boolphpids = opts.boolphpids
 if opts.boolOutputInteresting:
     boolOutputInteresting = opts.boolOutputInteresting
-if opts.boolMultiFile:
-    boolSingleFile=not opts.boolMultiFile
 if opts.boolOutputIDS:
     boolOutputIDS = opts.boolOutputIDS
+if opts.boolMultiFile:
+    boolSingleFile=not opts.boolMultiFile
 if opts.boolIIS:
     boolIIS = opts.boolIIS
 if opts.boolJSON:
@@ -479,24 +535,33 @@ if strInputFilePath == "":
         
 if os.path.isdir(strInputPath):
     bool_header_logged = False
-    for file in os.listdir(strInputPath):
-        if os.path.isdir(os.path.join(strInputPath, file)):
-            for subfile in os.listdir(os.path.join(strInputPath, file)):
-                print(os.path.join(os.path.join(strInputPath, file), subfile))
-                if not bool_header_logged:
-                    header_row = autodetect_format(strInputFilePath, header_row)
-                    bool_header_logged = False
+    if not boolSingleFile:
+     
+     process_directory(strInputPath, strOutputPath, header_row)
+    else:
+      for file in os.listdir(strInputPath):
+          if os.path.isdir(os.path.join(strInputPath, file)):
+              for subfile in os.listdir(os.path.join(strInputPath, file)):
+                  print(os.path.join(os.path.join(strInputPath, file), subfile))
+                  if not bool_header_logged:
+                      header_row = autodetect_format(strInputFilePath, header_row)
+                      
                     
-                fileProcess(os.path.join(os.path.join(strInputPath, file), subfile), subfile, strOutputPath)
-                header_row = ""
-        else:
-            fileProcess(os.path.join(strInputPath, file), file, strOutputPath)
-else:
+                  fileProcess(os.path.join(os.path.join(strInputPath, file), subfile), subfile, strOutputPath,str_header_row=header_row)
+                  bool_header_logged = True
+          else:
+              if not bool_header_logged:
+                header_row = autodetect_format(os.path.join(strInputPath, file), header_row)  
+              fileProcess(os.path.join(strInputPath, file), file, strOutputPath, str_header_row=header_row)
+          bool_header_logged = True
+          header_row = ""
+if os.path.isfile(strInputPath):
     fileName = os.path.basename(strInputFilePath)
     header_row = autodetect_format(strInputFilePath, header_row)
     
     fileProcess(strInputFilePath, fileName, strOutputPath, str_header_row=header_row)
-
+else:
+    print(f"{bcolors.FAIL}Error: Path could not be processed. Check that it exists and you have access to it: {strInputPath}{bcolors.ENDC}")
 
 
 print("Completed!")

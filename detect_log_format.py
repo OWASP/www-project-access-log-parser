@@ -21,7 +21,7 @@ def get_log_format(strInputFpath, inputEncoding,quote_char):
         first_row_read = True
         logreader = csv.reader(line.splitlines(), delimiter=' ', quotechar=quote_char)
         for row in logreader:
-          print(row)
+          #print(row)
           bool_date_found = False 
           bool_request_ending = False # this was added to track the request column. Set to true once "HTTP/" is encountered. Example: HTTP/1.1"
                     
@@ -56,7 +56,7 @@ def get_log_format(strInputFpath, inputEncoding,quote_char):
                   boolRequestEnding = True 
                   list_header.append("status")
                   list_header.append("size")
-                print(len(row))
+                #print(len(row))
                 if len(row) > 11 + offset:
                   list_header.append("referrer")
                   list_header.append("useragent")
@@ -73,7 +73,7 @@ def get_log_format(strInputFpath, inputEncoding,quote_char):
        elif "#Fields: " in line:
          tmp_header = line.replace("#Fields: ","").rstrip()
          list_header = tmp_header.split()
-         print(list_header)
+         #print(list_header)
          dict_header_info["header_row"] = list_header
          dict_header_info["iis"] = True
          break
@@ -86,16 +86,16 @@ def get_log_format(strInputFpath, inputEncoding,quote_char):
 def parse_supplied_header(supplied_header):
 
   if ", " in supplied_header:
-    print("comma space")
+    #print("comma space")
     list_header = supplied_header.split(", ")
   elif "," in supplied_header:
-    print("comma")
+    #print("comma")
     list_header = supplied_header.split(",")
   elif "\t" in supplied_header:
-    print("tab")
+    #print("tab")
     list_header = supplied_header.split("\t")
   elif " " in supplied_header:
-    print("space")
+    #print("space")
     list_header = supplied_header.split(" ")
   dict_header_info["header_row"] = list_header
   return dict_header_info
