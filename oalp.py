@@ -49,6 +49,7 @@ boolHead = False
 custom_ids_sig_file="custom_filter.json"
 boolJSON=False
 customJsonFieldNames=None
+FileTypes=None
 
 logger = logging.getLogger(__name__)
 logger.propagate = False
@@ -87,6 +88,8 @@ def build_cli_parser():
                       help="True or False value if suspicious formatting should be logged")
     parser.add_option("-m", "--MicrosoftIIS", action="store_true", default=False, dest="boolIIS",
                       help="True or False value if Microsoft IIS logs")
+    parser.add_option("-t", "--file-type", action="store", default=None, dest="FileType",
+                  help="Specify the type of files to process (e.g., log, csv)")
     parser.add_option("-w", "--headerrow", action="store", default=None, dest="header_row",
                       help="Override auto-detect header row with the this provided value")
     parser.add_option("-c", "--custom-filter", action="store", default="custom_filter.json", dest="custom_ids_sig_file",
@@ -177,6 +180,9 @@ def appendQuote(strRow):
 def right(s, amount):
     return s[-amount:]
 
+def checkForFileTypeMatch(file,FileTypes):
+     return any(file.endswith(suffix) for suffix in FileTypes)
+
 def deobfuscateEncoding(line):
     global boolSuspiciousLineFound
     if (line[:1] == "+" and line.replace("+", "").replace("]", "").isnumeric()) == True:
@@ -209,10 +215,14 @@ def CheckRemainingColumns(row_Check, intCurrentLoc, boolNumeric):#check for spec
 def process_file(file_path, file_name, output_path, str_header_row = ""):
     fileProcess(file_path, file_name, output_path, str_header_row)
 
-def process_directory(input_path, output_path, str_header_row = ""):
+def process_directory(input_path, output_path, str_header_row = "", file_types=None):
     with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = []
-
+        
+        for file_name in os.listdir(input_path):
+            if file_types and not checkForFileTypeMatch(file_name, file_types):
+                continue
+            
         for file_name in os.listdir(input_path):
 
             file_path = os.path.join(input_path, file_name)
@@ -513,6 +523,8 @@ if opts.boolOutputInteresting:
     boolOutputInteresting = opts.boolOutputInteresting
 if opts.boolOutputIDS:
     boolOutputIDS = opts.boolOutputIDS
+if opts.FileType:
+    FileTypes=opts.FileType.split(',')
 if opts.boolMultiFile:
     boolSingleFile=not opts.boolMultiFile
 if opts.boolIIS:
@@ -537,7 +549,7 @@ if os.path.isdir(strInputPath):
     bool_header_logged = False
     if not boolSingleFile:
      
-     process_directory(strInputPath, strOutputPath, header_row)
+     process_directory(strInputPath, strOutputPath, header_row, file_types=FileTypes)
     else:
       for file in os.listdir(strInputPath):
           if os.path.isdir(os.path.join(strInputPath, file)):

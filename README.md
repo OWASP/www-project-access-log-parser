@@ -16,6 +16,9 @@ Options:
   -i INPUTPATH, --input=INPUTPATH
                         Path to folder containing logs to be formatted
 
+  -t FILETYPE, --file-type=FILETYPE
+                        Specify the type of files to process (e.g., log, csv)
+
   -o OUTPUTPATH, --output=OUTPUTPATH
                         Formatted log output folder path
 
@@ -41,6 +44,11 @@ Options:
   --multi-file-output   Specify whether each input file should have a separate output file. If not set, all input files will be processed together, and a single output file will be generated. Default is False.
 
   -c, --custom-filter   Specify the custom IDS rules file to use
+
+  -j, --json-logs       True or False value if log format is JSON
+  --field-names=CUSTOMJSONFIELDNAMES
+                        JSON representation of field names mapping
+
 <br /> 
 <br /> 
 Example:
