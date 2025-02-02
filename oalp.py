@@ -46,6 +46,7 @@ boolSuspiciousLineFound = False #variable used to track when a line contains enc
 phpidSignatures = {} #phpids signatures
 customSignatures = {} #IDS signatures for deobfuscated log entries
 boolHead = False
+OutputFormat="csv"
 custom_ids_sig_file="custom_filter.json"
 boolJSON=False
 customJsonFieldNames=None
@@ -280,7 +281,19 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
         strInputFpath = tmpFilePath
         print("file created for parsing " + tmpFilePath)
 
-        
+    if os.path.isdir(strInputFpath):
+        return None
+    elif not os.path.exists(strInputFpath):
+        print('Error: The specified input file does not exist.')
+        print('Please provide a valid input file path.')
+        return None 
+
+
+    file_extension = ""
+    if OutputFormat:
+        file_extension = "." + OutputFormat
+        ## TODO support JSON output
+
     
     if os.path.isdir(strInputFpath):
         return None
@@ -288,25 +301,25 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
         return None    
     if boolSingleFile == True:
 
-        strOutPath = strOutPath + "LogOutput.Formatted"
+        strOutPath = strOutPath + "_processed"
     else:
-        strOutPath = strOutPath + strFileName + ".Formatted"
+        strOutPath = strOutPath + strFileName + "_processed"
     file_handle_ids = None
     if boolphpids == True and boolOutputIDS == True:
         try:
-            file_handle_ids = io.open(strOutPath + ".IDS", "a", encoding=outputEncoding) #open file handle for logging IDS matches
+            file_handle_ids = io.open(strOutPath + ".IDS" + file_extension, "a", encoding=outputEncoding) #open file handle for logging IDS matches
         except IOError as e:
              print(f"Error opening file for IDS logging: {e.strerror}")
              sys.exit(-1)
     if boolphpids == True or boolOutputSuspicious == True or boolOutputInteresting == True:#open file handle for interesting log output
         try:
-            fi = open(strOutPath + ".interesting","a", encoding=outputEncoding) #suspicious log entry output
+            fi = open(strOutPath + ".interesting" + file_extension,"a", encoding=outputEncoding) #suspicious log entry output
         except IOError as e:
             print(f"Error opening file for IDS logging: {e.strerror}")
     csv.field_size_limit(2147483647) #increase threshold to avoid length limitation errors
 
     with open(strInputFpath, "rt", encoding=inputEncoding) as csvfile:
-        with io.open(strOutPath , "a", encoding=outputEncoding) as f:
+        with io.open(strOutPath  + file_extension, "a", encoding=outputEncoding) as f:
             #print(str_header_row)
             if str_header_row != "":
                 #print("header row")
@@ -567,7 +580,7 @@ if os.path.isdir(strInputPath):
               fileProcess(os.path.join(strInputPath, file), file, strOutputPath, str_header_row=header_row)
           bool_header_logged = True
           header_row = ""
-if os.path.isfile(strInputPath):
+if os.path.isfile(strInputFilePath):
     fileName = os.path.basename(strInputFilePath)
     header_row = autodetect_format(strInputFilePath, header_row)
     
