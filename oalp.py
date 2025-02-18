@@ -51,6 +51,7 @@ custom_ids_sig_file="custom_filter.json"
 boolJSON=False
 customJsonFieldNames=None
 FileTypes=None
+fallback_encoding = "windows-1251"
 
 logger = logging.getLogger(__name__)
 logger.propagate = False
@@ -245,11 +246,16 @@ def process_directory(input_path, output_path, str_header_row = "", file_types=N
                 print(f"Error processing file: {e}")
                 #log error
 
-def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
+def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = "", int_resume_line=0, overide_encoding=""):
     global boolSuspiciousLineFound
     global boolHead
     global columnCount
     boolIDSdetection = False
+    int_line_count = 0
+    
+    tmp_input_encoding = inputEncoding
+    if overide_encoding != "":
+        tmp_input_encoding = overide_encoding
 
     if boolJSON:     #checking if input file type is json and converting it CLF
        strInputFpath, tmp_header_row=jsonLogParser.parseJSONLogs(strInputFpath,strOutputPath,customJsonFieldNames)
@@ -269,7 +275,7 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
         if os.path.isfile(tmpFilePath):
             os.remove(tmpFilePath )
         
-        with open(strInputFpath, "rt", encoding=inputEncoding) as inputFile:
+        with open(strInputFpath, "rt", encoding=tmp_input_encoding) as inputFile:
             for tmpLineIn in inputFile:
                 tmpLineOut = tmpLineIn
                 if right(tmpLineOut, 4) == '\\""\n':
@@ -301,25 +307,27 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
         return None    
     if boolSingleFile == True:
 
-        strOutPath = strOutPath + "_processed"
+        str_output_path = strOutPath + "_processed"
     else:
-        strOutPath = strOutPath + strFileName + "_processed"
+        str_output_path = strOutPath + strFileName + "_processed"
     file_handle_ids = None
     if boolphpids == True and boolOutputIDS == True:
         try:
-            file_handle_ids = io.open(strOutPath + ".IDS" + file_extension, "a", encoding=outputEncoding) #open file handle for logging IDS matches
+            file_handle_ids = io.open(str_output_path + ".IDS" + file_extension, "a", encoding=outputEncoding) #open file handle for logging IDS matches
         except IOError as e:
              print(f"Error opening file for IDS logging: {e.strerror}")
              sys.exit(-1)
     if boolphpids == True or boolOutputSuspicious == True or boolOutputInteresting == True:#open file handle for interesting log output
         try:
-            fi = open(strOutPath + ".interesting" + file_extension,"a", encoding=outputEncoding) #suspicious log entry output
+            fi = open(str_output_path + ".interesting" + file_extension,"a", encoding=outputEncoding) #suspicious log entry output
         except IOError as e:
             print(f"Error opening file for IDS logging: {e.strerror}")
     csv.field_size_limit(2147483647) #increase threshold to avoid length limitation errors
 
-    with open(strInputFpath, "rt", encoding=inputEncoding) as csvfile:
-        with io.open(strOutPath  + file_extension, "a", encoding=outputEncoding) as f:
+    with open(strInputFpath, "rt", encoding=tmp_input_encoding) as csvfile:
+      bool_encoding_fallback = False # used with the next statement to close the file
+      for _ in (True,): #https://stackoverflow.com/questions/11195140/break-or-exit-out-of-with-statement - user2137858  
+        with io.open(str_output_path  + file_extension, "a", encoding=outputEncoding) as f:
             #print(str_header_row)
             if str_header_row != "":
                 #print("header row")
@@ -329,6 +337,8 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
             reader = csv.reader(csvfile, delimiter=' ', quotechar=csv_quotechar)
             try:
               for r_row in reader: #loop through each row of input
+                  if int_line_count < int_resume_line:
+                    next(reader)
                   queuedRows = [r_row]
                   intCheckFirstUserInput = 0
                   if strLineBeginingRE != "": #can we validate the row start with regex
@@ -488,7 +498,7 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
                       if right(outputRow, 1) != '\"':
                           #outputRow = outputRow + '\"'
                           if boolOutputUnformatted == True:
-                              with io.open(strOutPath + ".Unformatted", "a", encoding=outputEncoding) as fU:#Unformatted output that eluded a final quote
+                              with io.open(str_output_path + ".Unformatted", "a", encoding=outputEncoding) as fU:#Unformatted output that eluded a final quote
                                   fU.write(outputRow + "\n")
                       outputRow = appendQuote(outputRow) 
 
@@ -498,9 +508,21 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = ""):
                               boolSuspiciousLineFound = False
                               boolIDSdetection = False
                               fi.write(outputRow + "\n")
+                  int_line_count +=1
             except UnicodeDecodeError:
               logger.error("Error: File not encoded in UTF-8: %s", strInputFpath, exc_info=True)
+              if fallback_encoding != "" and fallback_encoding != overide_encoding: #is fallback encoding configured and have we already tried it
+                logger.info("Info: Attempting backup encoding: %s", fallback_encoding)
+                #need to exit out of the with statement to unlock the file
+                bool_encoding_fallback = True
+                print(f"{bcolors.FAIL}Error: File not encoded in UTF-8 (see oalp.log for exception details). Trying a different encoding for file {strInputFpath}{bcolors.ENDC}")
+                break
               print(f"{bcolors.FAIL}Error: File not encoded in UTF-8 (see oalp.log for exception details). Try a different encoding for file {strInputFpath}{bcolors.ENDC}")
+              print(f"{bcolors.WARNING}Warning: File encoding changes may be an indicator of log tampering {bcolors.ENDC}")
+      if bool_encoding_fallback == True:
+        print(f"{bcolors.WARNING}Warning: File encoding changes may be an indicator of log tampering {bcolors.ENDC}")      
+        return fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = "", int_resume_line=int_line_count, overide_encoding=fallback_encoding)
+              
 
     if os.path.isfile(strInputFilePath +".tmp"):
         os.remove(strInputFilePath +".tmp")     
@@ -580,7 +602,7 @@ if os.path.isdir(strInputPath):
               fileProcess(os.path.join(strInputPath, file), file, strOutputPath, str_header_row=header_row)
           bool_header_logged = True
           header_row = ""
-if os.path.isfile(strInputFilePath):
+elif os.path.isfile(strInputFilePath):
     fileName = os.path.basename(strInputFilePath)
     header_row = autodetect_format(strInputFilePath, header_row)
     
