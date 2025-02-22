@@ -913,7 +913,34 @@
           ]
         },
         "impact":"4"
-      }
+      },
+      {
+        "id": "79",
+        "rule": "(?i)\\b(?:file_get_contents|fsockopen|curl_exec|wget)\\b\\W*\\(",
+        "description": "Detects potential SSRF vulnerabilities",
+        "tags": {
+            "tag": ["ssrf", "id"]
+        },
+        "impact": "6"
+      },
+      {
+        "id": "80",
+        "rule": "<!\\[CDATA\\[|DOCTYPE\\s+",
+        "description": "Detecting XML-related patterns",
+        "tags": {
+            "tag": ["xxe", "id"]
+        },
+        "impact": "6"
+      },
+      {
+        "id": "81",
+        "rule": "(?i)\\b(?:system|exec|shell_exec|passthru|popen)\\b\\W*\\(",
+        "description": "Detects potential command injection vulnerabilities",
+        "tags": {
+            "tag": ["cmdi", "id"]
+        },
+        "impact": "6"
+    }
     ]
   }
 }
