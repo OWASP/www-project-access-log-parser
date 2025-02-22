@@ -2,7 +2,7 @@
   "filters":{
     "filter": [
       {
-        "id": "79",
+        "id": "5079",
         "rule": "(?:script>[^<]*alert\\()",
         "description": "Detects HTML injection test",
         "tags": {
@@ -13,7 +13,7 @@
         "impact": "3"
       },
       {
-        "id": "80",
+        "id": "5080",
         "rule": "(?:^[^\\(]*\\))",
         "description": "Detects parentheses mismatch common with SQL injection",
         "tags": {
@@ -24,7 +24,7 @@
         "impact": "3"
       },
       {
-        "id": "81",
+        "id": "5081",
         "rule": "(?:('|`))",
         "description": "Detects single quote",
         "tags": {
@@ -35,7 +35,7 @@
         "impact": "4"
       },
       {
-        "id": "82",
+        "id": "5082",
 
         "rule": "(?:(\\s+(and|or)\\s+|;|=|]-|\\+)(|not\\s+)(\\(|exp|json_keys|extractvalue|updatexml|row|select|\\d+=\\d+\\W))",
         "description": "Detects logic manipulation",
@@ -47,7 +47,7 @@
         "impact": "4"
       },
       {
-        "id": "83",
+        "id": "5083",
         "rule": "waitfor delay",
         "description": "Detects WAITFOR DELAY",
         "tags": {
@@ -58,7 +58,7 @@
         "impact": "2"
       },
       {
-        "id": "84",
+        "id": "5084",
         "rule": "(?:(#|--|\\/\\*.*\\*\\/))",
         "description": "Detects common comment types",
         "tags": {
@@ -71,7 +71,7 @@
         "impact": "3"
       },
       {
-        "id": "85",
+        "id": "5085",
         "rule": "(?:(\\$\\{\\S*j\\S*n\\S*d*\\S(i|\\u0131)\\S*:\\S*l\\S*d\\S*a\\S*p\\S*:\\S*\\/\\S*\\/))",
         "description": "Detects possible log4j2 exploit",
         "tags": {
