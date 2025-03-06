@@ -332,6 +332,8 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = "", int
             if str_header_row != "":
                 #print("header row")
                 f.write(str_header_row + "\n")
+                if boolphpids == True or boolOutputSuspicious == True or boolOutputInteresting == True:#log header for interesting log output
+                    fi.write(str_header_row + "\n")
                 boolHead = True # only write header row once
             queuedRows = []
             reader = csv.reader(csvfile, delimiter=' ', quotechar=csv_quotechar)
