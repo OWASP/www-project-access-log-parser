@@ -46,12 +46,17 @@ boolSuspiciousLineFound = False #variable used to track when a line contains enc
 phpidSignatures = {} #phpids signatures
 customSignatures = {} #IDS signatures for deobfuscated log entries
 boolHead = False
-OutputFormat="csv"
+OutputFormat="csv" #Someday JSON will be supported
 custom_ids_sig_file="custom_filter.json"
 boolJSON=False
 customJsonFieldNames=None
 FileTypes=None
 fallback_encoding = "windows-1251"
+force_header_validation = True #Checks for differences in header values between input files and creates a new output file
+sani_pattern = r"" #Regex used to remove sensitive data from logs
+sani_replacement = "" #Replacement for sensitive data found with above regex
+disabled_rules = [] #This is used to disable rules that are not useful or cause false positives.
+
 
 logger = logging.getLogger(__name__)
 logger.propagate = False
@@ -103,6 +108,8 @@ def build_cli_parser():
                   help="True or False value if log format is JSON")
     parser.add_option("--field-names", action="store", default=None, dest="customJsonFieldNames", 
                   help='JSON representation of field names mapping') 
+    parser.add_option("--disabled-rules", action="store", default=None, dest="disabled_rules",
+                      help="Comma-separated list of numeric rule IDs to disable (e.g., 1,2,3)")
     return parser
 
 def config_iis():
@@ -140,6 +147,15 @@ def phpIDS (strMatchCheck, idsFileHandle):
     if phpidSignatures == {}:
         with open('default_filter.json') as json_file:
             phpidSignatures = json.load(json_file)
+        i=0
+        #loop through and remove disabled rules
+        while i < len(phpidSignatures['filters']['filter']):
+          if phpidSignatures['filters']['filter'][i]['id'] in disabled_rules:
+            print(f"removing rule ID {phpidSignatures['filters']['filter'][i]['id']}")
+            del phpidSignatures['filters']['filter'][i]
+          else:
+            i += 1
+
     for filter in phpidSignatures['filters']['filter']:
         if re.search( filter['rule'], strMatchCheck.lower()):
             #print('id: ' + filter['id'])
@@ -246,7 +262,7 @@ def process_directory(input_path, output_path, str_header_row = "", file_types=N
                 print(f"Error processing file: {e}")
                 #log error
 
-def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = "", int_resume_line=0, overide_encoding=""):
+def fileProcess(strInputFpath, strFileName, strOutPath, original_output_path="", str_header_row = "", int_resume_line=0, overide_encoding=""):
     global boolSuspiciousLineFound
     global boolHead
     global columnCount
@@ -304,22 +320,26 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = "", int
     if os.path.isdir(strInputFpath):
         return None
     elif not os.path.exists(strInputFpath):
-        return None    
+        return None
+    if original_output_path == "":
+        original_output_path = strOutPath
     if boolSingleFile == True:
-
         str_output_path = strOutPath + "_processed"
+        original_out = original_output_path + "_processed"
     else:
         str_output_path = strOutPath + strFileName + "_processed"
+        original_out = original_output_path + strFileName + "_processed"
     file_handle_ids = None
     if boolphpids == True and boolOutputIDS == True:
         try:
-            file_handle_ids = io.open(str_output_path + ".IDS" + file_extension, "a", encoding=outputEncoding) #open file handle for logging IDS matches
+            file_handle_ids = io.open(original_out + ".IDS" + file_extension, "a", encoding=outputEncoding) #open file handle for logging IDS matches
+            file_handle_ids.write('"ID,"Description","match"' + "\n")
         except IOError as e:
              print(f"Error opening file for IDS logging: {e.strerror}")
              sys.exit(-1)
     if boolphpids == True or boolOutputSuspicious == True or boolOutputInteresting == True:#open file handle for interesting log output
         try:
-            fi = open(str_output_path + ".interesting" + file_extension,"a", encoding=outputEncoding) #suspicious log entry output
+            fi = open(original_out + ".interesting" + file_extension,"a", encoding=outputEncoding) #suspicious log entry output
         except IOError as e:
             print(f"Error opening file for IDS logging: {e.strerror}")
     csv.field_size_limit(2147483647) #increase threshold to avoid length limitation errors
@@ -387,12 +407,14 @@ def fileProcess(strInputFpath, strFileName, strOutPath, str_header_row = "", int
                           boolQuoteRemoved = False
                           boolEscapeChar = False
 
-
+                          #remove confidential/sensitive data match
+                          saniColumn = re.sub(sani_pattern, sani_replacement, column)
+                          
                           if boolphpids == True and boolSuspiciousLineFound != True:
-                              boolIDSdetection = phpIDS(column, file_handle_ids)
+                              boolIDSdetection = phpIDS(saniColumn, file_handle_ids)
                               boolSuspiciousLineFound  = boolIDSdetection
-                          #saniColumn = str.replace(column, "'","") # remove quote chars
-                          saniColumn = column
+                          
+ 
                           if boolIIS == True and intColumnCount == 1 and "#Fields:" in saniColumn:
                               if boolHead == False:
                                   saniColumn = ""
@@ -576,12 +598,42 @@ if opts.header_row:
     header_row = opts.header_row
 if opts.custom_ids_sig_file:
     custom_ids_sig_file = opts.custom_ids_sig_file
+if opts.disabled_rules:
+    disabled_rules = [x.strip() for x in opts.disabled_rules.split(',') if x.strip().isdigit()]
+    print(disabled_rules)
+
 
 if strInputFilePath == "":
     if os.path.isfile(strInputPath):#check if a file path was provided instead of a folder
             strInputFilePath = strInputPath #use file instead of folder
             strInputPath = ""
+
+def find_unique_filename(base_filename, str_file_extension):
+    """
+    Generates a unique filename by appending a number if the base filename exists.
+    """
+    counter = 0
+    while True:
+        if counter == 0:
+            filename = f"{base_filename}"
+        else:
+            filename = f"{base_filename}_{counter}"
         
+        if not os.path.exists(f"{filename}_processed.{str_file_extension}"):
+            print(f"New file name: {filename}")
+            return filename
+        counter += 1
+
+def header_check(str_previous_header, str_new_header, str_output_path):
+    if not str_previous_header: #First file we will not have a previous value
+        return str_output_path, str_new_header #return current output path and header to be written
+    if str_previous_header and str_previous_header != str_new_header: #this needs moved into a function and happen every time a header may change
+        print(f"Header changed for file {file} from \n {previous_header} \nto \n {header_row}\nDue to log format change the script will create a new output file")
+        return find_unique_filename(strOutputPath, OutputFormat), str_new_header
+    return str_output_path, "" #return current output path and no header since it was already written
+    
+previous_header = None
+original_out_path = strOutputPath
 if os.path.isdir(strInputPath):
     bool_header_logged = False
     if not boolSingleFile:
@@ -592,16 +644,20 @@ if os.path.isdir(strInputPath):
           if os.path.isdir(os.path.join(strInputPath, file)):
               for subfile in os.listdir(os.path.join(strInputPath, file)):
                   print(os.path.join(os.path.join(strInputPath, file), subfile))
-                  if not bool_header_logged:
-                      header_row = autodetect_format(strInputFilePath, header_row)
+                  if not bool_header_logged or force_header_validation:
                       
-                    
-                  fileProcess(os.path.join(os.path.join(strInputPath, file), subfile), subfile, strOutputPath,str_header_row=header_row)
+                      header_row = autodetect_format(strInputFilePath, header_row)
+
+                  strOutputPath, tmp_header = header_check(previous_header, header_row, strOutputPath) # a different/new header means we need a new file for CSV output (once we support JSON output this will not matter for that)
+                  fileProcess(os.path.join(os.path.join(strInputPath, file), subfile), subfile, strOutputPath,str_header_row=tmp_header, original_output_path=original_out_path)
                   bool_header_logged = True
+                  previous_header = header_row
           else:
-              if not bool_header_logged:
-                header_row = autodetect_format(os.path.join(strInputPath, file), header_row)  
-              fileProcess(os.path.join(strInputPath, file), file, strOutputPath, str_header_row=header_row)
+              if not bool_header_logged or force_header_validation:
+                header_row = autodetect_format(os.path.join(strInputPath, file), header_row)
+              strOutputPath, tmp_header = header_check(previous_header, header_row, strOutputPath) # a different/new header means we need a new file for CSV output
+              fileProcess(os.path.join(strInputPath, file), file, strOutputPath, str_header_row=tmp_header, original_output_path=original_out_path)
+              previous_header = header_row
           bool_header_logged = True
           header_row = ""
 elif os.path.isfile(strInputFilePath):
