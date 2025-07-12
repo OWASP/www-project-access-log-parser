@@ -339,7 +339,7 @@ def fileProcess(strInputFpath, strFileName, strOutPath, original_output_path="",
              sys.exit(-1)
     if boolphpids == True or boolOutputSuspicious == True or boolOutputInteresting == True:#open file handle for interesting log output
         try:
-            fi = open(original_out + ".interesting" + file_extension,"a", encoding=outputEncoding) #suspicious log entry output
+            fi = open(str_output_path + ".interesting" + file_extension,"a", encoding=outputEncoding) #suspicious log entry output
         except IOError as e:
             print(f"Error opening file for IDS logging: {e.strerror}")
     csv.field_size_limit(2147483647) #increase threshold to avoid length limitation errors
