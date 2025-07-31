@@ -1,13 +1,11 @@
 ### Access Log Parser Information
-* [Flagship Project](#)
+* [Project](#)
 * [Tool Project](#)
 * [Version 1.0.5](#)
-* [Builder](#)
-* [Breaker](#)
+
 
 ### Downloads or Social Links
-* [Download](#)
-* [Meetup](#)
+* [Download]([#](https://github.com/OWASP/www-project-access-log-parser/archive/refs/heads/master.zip))
 
 ### Code Repository
 * [repo](https://github.com/OWASP/www-project-access-log-parser)
