@@ -5,7 +5,7 @@
 
 
 ### Downloads or Social Links
-* [Download]([#](https://github.com/OWASP/www-project-access-log-parser/archive/refs/heads/master.zip))
+* [Download](https://github.com/OWASP/www-project-access-log-parser/archive/refs/heads/master.zip)
 
 ### Code Repository
 * [repo](https://github.com/OWASP/www-project-access-log-parser)
