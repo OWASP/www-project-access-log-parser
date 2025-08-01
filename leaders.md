@@ -1,2 +1,2 @@
 ### Leaders
-* [Ryan Boyle](mailto:randomrhythm@rhythmengineering.com)
+* [Ryan Boyle](mailto:ryan.boyle@owasp.org)
