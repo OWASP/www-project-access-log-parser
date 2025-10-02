@@ -1,0 +1,20 @@
+audience:
+  - builder
+leaders:
+  - name: Ryan Boyle
+    email: ryan.boyle@owasp.org
+level: 2
+license:
+  - AGPL-3.0
+name: OWASP Access Log Parser
+pitch: Parse and format web access logs for analysis.
+repositories:
+  - name: www-project-access-log-parser
+    url: https://github.com/OWASP/www-project-access-log-parser
+    description: OWASP Foundation Web Repository
+tags:
+  - log-parse
+  - custom-tag-1
+  - custom-tag-2
+type: tool
+website: https://owasp.org/www-project-access-log-parser
